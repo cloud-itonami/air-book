@@ -1,0 +1,224 @@
+[{:db/id -1
+  :adr/id "air-book-0001"
+  :adr/title "appview を TypeScript/Svelte から ClojureScript へ移す — 測定と移行"
+  :adr/status "accepted"
+  :adr/date "2026-08-18"
+  :adr/doc_type "adr"
+  :adr/source-format "edn"
+  :adr/body "
+# ADR-0001: appview を TypeScript/Svelte から ClojureScript へ移す
+
+**Status**: accepted / **Date**: 2026-08-18 / **Deciders**: Jun Kawasaki
+
+## Context — 移行前に測ったこと（2026-08-18、tree 7e3f95d）
+
+追跡 22 ファイル / 53,702 バイト。custody は無傷である: migration.edn が名指す
+出所（etzhayyim/root の tree 6abef302、20 ファイル / 53,217 バイト）に、
+:allowed-additions が宣言する README.edn（107）と migration.edn（378）を足すと
+ちょうど 53,702 になる。
+
+### 発見 1 — deploy される handler と、読み手が開くファイルが別（最重要）
+
+wrangler.jsonc の main は `svelte/.svelte-kit/cloudflare/_worker.js` を指す。
+これは SvelteKit のビルド出力で、**この tree に存在しない**（`svelte-kit` に
+一致する追跡ファイルは 0 件）。
+
+一方この repo で最もアプリケーションらしいファイルは src/app.ts（3,001 バイト）
+で、8 メソッド（createPnr / confirmBooking / issueTicket / assignSeat /
+addAncillary / cancelBooking / reprotectPassenger / settleBsp）を
+dispatcher.etzhayyim.com へ中継する。しかし **tree 全体を検索して app.ts への
+参照は 0 件**であり、それが import する型を宣言する package.json も無い
+（root の package.json は typescript の devDependency と tsc --noEmit だけ）。
+
+つまり app.ts はどのツールチェーンからもビルドされない。実際に deploy される
+のは SvelteKit のページと、/xrpc/[...path] を mcp.etzhayyim.com へ中継する
+1 本の route だけである。
+
+### 発見 2 — 公開ページが自分の設定と矛盾している
+
+svelte/src/routes/+page.svelte は訪問者に `Routes 0` と表示し、
+`No public route is declared next to this app surface` と
+`No public vars are declared in the nearest wrangler config` と書く。
+同じディレクトリの wrangler.jsonc は route を 2 本、var を 8 個宣言している。
+ページの値は生成物ではなく +page.svelte に literal で焼かれており、
+relativePath は抽出前の monorepo パス
+（60-apps/etzhayyim-project-air-book/svelte/src/routes/+page.svelte）のままである。
+
+### 発見 3 — 呼び先が 1 つも解決しない（dig +short、2026-08-18）
+
+air-book.etzhayyim.com / a1rb00k1.etzhayyim.com（wrangler の route 2 本）、
+mcp.etzhayyim.com（+server.ts の中継先）、dispatcher.etzhayyim.com
+（app.ts の中継先）—— 4 つとも A レコードを返さない。親ドメイン
+etzhayyim.com だけは解決する（104.21.51.111 / 172.67.179.128）。
+
+## Decision
+
+**appview を ClojureScript に移し、appview の TypeScript と Svelte を撤去する。**
+
+    src/air_book/route.cljc    判断（どの handler が答えるか）
+    src/air_book/view.cljc     ページ（jp-go-dds の hiccup）
+    src/air_book/worker.cljs   Request/Response に触る唯一の層
+            ↓ shadow-cljs :target :esm
+    dist/worker.js             wrangler.jsonc の main が指すもの
+
+この workspace の正本言語は cljs と kotoba である（superproject CLAUDE.md の
+runtime 順序 kotoba wasm > clojurewasm > ClojureScript > nbb）。TypeScript は
+その順序に無いので、app.ts と SvelteKit のどちらを正本に選んでも正本には
+着地しない。先例は同じ org の cloud-itonami/app-ongakuka と
+cloud-itonami-marketplace-listing。
+
+入口を .kotoba ではなく cljs に置くのは ADR-2606290000 の判断で、kotoba の
+ingress capability が :native-aot / :wasm-aot とも pending だからである。
+判断を .cljc に切り出してあるのは、ブラウザもビルドも無しに検査するためであり、
+ingress が qualify した時に最初に .kotoba へ移る部分だからでもある。
+
+### これで消えた欠陥
+
+- 発見 1 は構造的に消えた。main が指す bundle は src/ からコンパイルされる。
+  検証器が shadow の :output-dir と wrangler の main と export の ns 名の
+  3 つが噛み合っていることを検査する。
+- 発見 2 も構造的に消えた。ページは route 表（air-book.route/routes）を引数で
+  受け取って描く。表示と実際に答えるものが同じ 1 つの値から出る。
+- 発見 3 は**消えていない**。移行はホストを立てない。
+
+### 移していない経路（黙って消していない）
+
+src/app.ts にあってどこにも deploy されていなかった 8 メソッドと /_app/meta は
+**移していない**。理由は 2 つあり、どちらも測ったものである:
+
+1. 中継先 dispatcher.etzhayyim.com が NXDOMAIN
+2. app.ts が読む binding（DISPATCHER_URL / DISPATCHER_INTERNAL_SECRET）が
+   wrangler.jsonc に**宣言されていない**（vars 8 個のどれでもない）
+
+動かない経路を移植して『移行済み』と言わないためである。必要になった時点で
+route.cljc に足し、テストと binding を伴って戻す。
+
+### 足した経路
+
+/health は移行が**足した**もので、移行前の deploy 面には無い（app.ts には
+同名の経路があったが、それはどの bundle にも入っていなかった）。route 表に
+載っているのでページも README もそれを広告し、ずれない。
+
+### 多段 xrpc パスは移行前どおり中継する
+
+移行前の SvelteKit route は rest parameter [...path] で受けており、
+/xrpc/a/b の params.path は `a/b` になって、そのまま tool 名として転送されて
+いた。空文字だけが 400 である。cljs 版もそう書いた —— 1 セグメントに絞ると
+失敗の起きる場所と応答が変わり、**それは移行ではなく方針変更**だからである。
+絞りたいなら別の決定として記録する。
+
+### 残した TypeScript — kotoba/（意図的、7 ファイル / 37,445 バイト）
+
+kotoba/ は @etzhayyim/sdk を使う domain library（flightSegment / seatAssignment
+の平文経路と、pnr / eTicket / ancillary / reprotection の E2E 経路）で、
+vitest のテストを持つ。これは **appview ではない**:
+
+- wrangler.jsonc の main が指す bundle に入らない（移行前も後も）
+- tree の外から参照されず、tree の外を参照しない（依存は @etzhayyim/sdk のみ。
+  これは GitHub の redirect で kotoba-lang/sdk に解決する = 死んでいない）
+
+移行の対象は appview なので、これは触っていない。**撤去も移植もしていないと
+いう事実を README と検証器に固定した** —— 検証器は kotoba/ の .ts を
+ちょうど 5 本に固定するので、ここが黙って増えれば落ちる。cljs/kotoba への
+移行は別の決定であり、そのとき @etzhayyim/sdk の cljs 面が要る。
+
+### UI
+
+基盤は jp-go-digital-design-system（skill kotoba-uiux が定める新規 UI の base）。
+色・寸法は --hig-* トークン契約のみ、app 固有 CSS は 3 行。CSS は
+shadow.resource/inline で bundle に焼く（design system の外部リクエストゼロ
+方針）。
+
+ページは env の**キー**を出し、**値**は出さない —— ただし XRPC の中継先 URL
+だけは意図的に出す（中継先が読めないページは、中継が壊れたときに何の助けにも
+ならない）。したがってこのページの約束は『値を一切出さない』ではなく
+**『キーは出す・値は出さない・中継先だけは出す』**であり、検査もその形で
+書いてある。単一の印では『全部隠す』も『全部出す』も通ってしまうので、
+出てはならない印と出なければならない印を独立に当てている。
+
+## 検証（この ADR を書いた時点で実際に通したもの、2026-08-18）
+
+- air-book.route-test: 6 tests / 24 assertions、0 failures（nbb、ビルド不要）
+- ページ描画 → design-quality score 100.00、gate 95 PASS
+- scripts/verify-docs-claims.cljs: 18 claim すべて PASS、exit 0
+- shadow-cljs release worker: 55 files / 12 compiled / 0 warnings / 55.13s、
+  dist/worker.js 245,547 バイト（resource guard 経由。4 回目の試行で lock を取れた）
+- scripts/smoke-worker.cljs: 18 項目すべて PASS、exit 0
+- wrangler dev --local（workerd）: GET / が 200 text/html（dads-table を 71 箇所
+  含む）、GET /health が 200 で自分の route を名乗り、POST /xrpc/ が 400、
+  POST /xrpc/a/b が 502（中継先を名指しする本文つき）、OPTIONS が 204、
+  未知パスが 404、誤 method が 405
+
+### すべての gate を、緑を受け取る前に赤にした
+
+**緑のビルドは検査ではない。** 同じ未宣言 var を 2 通りの設定でビルドして
+両方向を見た:
+
+- :warnings-as-errors true を :compiler-options に置いた状態 → **rc=1**
+  （`{:warning :undeclared-var, :shadow.build.compiler/warning-as-error true}`）
+- 同じソースでそのキーを外した状態 → **rc=0**、
+  `Build completed. (55 files, 1 compiled, 1 warnings, 20.72s)` ——
+  **最初のリクエストで throw する bundle が緑で出荷される。**
+- キーを :build-options に移す（shadow が黙って無視する置き場所）→ 検証器の
+  2 claim が落ちる。検証器はこのファイルを grep しない —— 説明のコメント自身が
+  文字列を含むので、grep は自分の散文で通ってしまう。EDN として読んで
+  キーが**どこに在るか**を見る。
+
+smoke（ビルド済み bundle に対して）:
+
+- bundle が無い → **exit 2**（0 とも 1 とも別の『答えられなかった』）
+- bundle の Object.keys を Object.values に差し替える（= キーではなく値を
+  出すようにする）→ `page hides var values` と `page shows a var key` が
+  **同時に反転**。印を 2 つ独立に当てている理由がこれで、片方だけでは
+  『全部隠す』も『全部出す』も通る
+- route 文字列を壊す → ページと /health の 2 項目だけが落ちる
+- dads-table を別名にする → design system の項目だけが落ちる
+
+検証器: wrangler の main をビルド出力以外に向ける / 撤去した src/app.ts が戻る /
+**撤去リストに無い名前**の .ts が入る（このときは appview-ts-files だけが落ち、
+removed-by-migration-absent は落ちない = 2 つの claim が独立している）/
+kotoba/ の .ts が 1 本増える / assets と compatibility_flags が戻る /
+継承ファイルを 1 バイト変える / 新しい名前の .svelte が入る /
+ページが route 表でなく固定表を描く —— 8 通りすべてで、対応する claim だけが
+落ちることを確認した。
+
+### design-quality の 100.00 が保証しないもの（実測）
+
+同じページで 3 通り測った:
+
+- design system の CSS を**丸ごと外す** → **96.63、gate PASS**
+- app CSS の --hig-* を raw rgba() と 13px に置き換える → **100.00、gate PASS**
+- viewport meta を消して body に 12px を指定する → **88.76、gate FAIL**
+
+つまり点数は『design system が在る』ことを言わない（前 2 つは外した mutation で
+あって、緑を実演と数えない）。**『DADS が bundle に載っている』は smoke が
+dads-table class を直接見て主張する。** gate 自体が赤くなれることは 3 つ目で
+確かめた。
+
+### 落ちない検査を 1 つ書いて、見つけて直した
+
+unit test の初版は『env の値がページに出ていない』を view の層で主張していた。
+**この assertion は何をどう壊しても落ちない** —— worker は view にキーしか
+渡さない（`(sort (keys e))`）ので、その層に漏れる値が存在しないからである。
+測って問題が無かったことと測れなかったことを同じ値で返す形（superproject
+ADR-2608136000 が名指しした class）そのものだった。
+
+値の露出は env が実在する層でしか主張できないので、否定は smoke（実 env、
+ビルド済み bundle）に置き直し、unit test には**その印が描画経路に載る文字列で
+あること**だけを残した。これが偽なら smoke の否定検査が構造的に落ちなくなる。
+
+## Consequences
+
+- appview の production TypeScript は 3 本から 0 本になり、正本言語
+  （.cljs / .cljc）が 0 本から 4 本になった。この 2 つは検証器の claim なので、
+  TS が戻れば落ちる —— 撤去した 9 パスに戻る場合と、別名で入る場合を別々の
+  claim が捕まえる。
+- 継承した 12 ファイル（41,756 バイト）は 1 バイトも変わっていない
+  （sha256 を検証器に固定）。wrangler.jsonc だけは意図的に変更した
+  （main の付け替え、消えた SvelteKit client を指す assets の撤去、
+  compatibility_flags の撤去、APP_FRAMEWORK の更新）。
+- ホストは相変わらず NXDOMAIN である。移行はそれを直さない。deploy するか
+  retire するかは別の決定。
+- MIGRATION-TODO.md の憲章適合レビュー 7 項目は未チェックのままである。
+  移行はそれも直さない。
+"}]
