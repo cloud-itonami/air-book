@@ -1,0 +1,117 @@
+#!/usr/bin/env nbb
+;; smoke-worker — 実際にビルドされた bundle を import して叩く。
+;;
+;; ここが「deploy される成果物」に触る唯一の検査である。unit test
+;; (test/air_book/route_test.cljc) はソースの判断を固定するが、bundle が
+;; 本当に Worker の形で答えるかは言えない —— export の形、shadow の
+;; 最適化、`shadow.resource/inline` で焼いた CSS は、どれもビルドを通って
+;; 初めて存在する。
+;;
+;; Usage:  nbb scripts/smoke-worker.cljs [<dist/worker.js>]
+;; Exit:   0 全て期待どおり · 1 期待と違う · 2 判定できなかった（bundle が無い等）
+
+(require '["node:fs" :as fs] '["node:path" :as path] '["node:url" :as url]
+         '[clojure.string :as str])
+
+(def bundle
+  "ESM の import は相対パスを package 名と読むので、必ず絶対パスに直してから
+  file:// URL にする（`dist/worker.js` をそのまま渡すと『Cannot find package
+  dist』になる。実測）。"
+  (let [a (first (remove #(str/starts-with? % "--") *command-line-args*))]
+    (.resolve path (or a "dist/worker.js"))))
+
+(def failures (atom []))
+(defn check! [label expected actual]
+  (let [ok (= expected actual)]
+    (println (str (if ok "PASS" "FAIL") "\t" label
+                  "\texpected=" (pr-str expected) "\tactual=" (pr-str actual)))
+    (when-not ok (swap! failures conj label))))
+
+(when-not (.existsSync fs bundle)
+  (println (str "UNDETERMINED\tno bundle at " bundle))
+  (println "Refusing to report a pass: build it first (see docs/operator-quickstart.md S4).")
+  (js/process.exit 2))
+
+;; ── 2 つの独立した印 ───────────────────────────────────────────────
+;; 片方だけでは足りない。「値が出ていない」だけを見る検査は *何も描かない*
+;; ページでも通り、「キーが出ている」だけを見る検査は *全部描く* ページでも
+;; 通る。両方を別々に当てて初めて『キーは出す・値は出さない』が言える。
+;;
+;; 印を実在しそうな値（wrangler の APP_UI_TYPE は "yoro"）にしないのは、
+;; 他の文言と偶然一致しうるうえ、引用符ごと探すと renderer が " を &quot; に
+;; escape して**決して一致しない** = 検査が構造的に落ちなくなるためである。
+(def secret-value "SENTINEL-VALUE-4d81ba")   ; 出てはならない（env の値）
+(def visible-key "SENTINEL_KEY_4d81ba")      ; 出なければならない（env のキー）
+
+(def router-url
+  "`.invalid` は予約 TLD で、決して解決しない。中継先をここに向けておくと、
+  『中継しようとしたか』を **実在の DNS に依存せずに** 観測できる
+  （mcp.etzhayyim.com が今日 NXDOMAIN であることに寄りかからない）。"
+  "https://router.invalid/xrpc/com.etzhayyim.mcp.message")
+
+(def env #js {"APP_NANOID" "a1rb00k1"
+              "APP_UI_TYPE" secret-value
+              "SENTINEL_KEY_4d81ba" "unused"
+              "AGENTGATEWAY_MCP_ROUTER_URL" router-url})
+
+(defn- call [h method path]
+  (let [req (js/Request. (str "https://air-book.etzhayyim.com" path) #js {:method method})]
+    (-> (js/Promise.resolve ((.-fetch h) req env #js {}))
+        (.then (fn [res] (-> (.text res)
+                             (.then (fn [body] {:status (.-status res)
+                                                :ct (.get (.-headers res) "content-type")
+                                                :body body}))))))))
+
+(-> (js/import (.-href (.pathToFileURL url bundle)))
+    (.then
+     (fn [m]
+       (let [h (.-default m)]
+         (check! "default export has fetch" true (fn? (.-fetch h)))
+         (-> (js/Promise.all
+              #js [(call h "GET" "/") (call h "GET" "/health")
+                   (call h "POST" "/xrpc/") (call h "OPTIONS" "/xrpc/x")
+                   (call h "GET" "/nope") (call h "POST" "/health")
+                   (call h "POST" "/xrpc/com.etzhayyim.apps.airBook.createPnr")
+                   (call h "POST" "/xrpc/a/b")])
+             (.then
+              (fn [[page health bad pre nf mna one multi]]
+                (check! "GET / status" 200 (:status page))
+                (check! "GET / is html" true (str/includes? (or (:ct page) "") "text/html"))
+                ;; ページは route 表から描かれる。表にある path が全部出ていること。
+                (doseq [p ["/health" "/xrpc/:nsid"]]
+                  (check! (str "page advertises " p) true (str/includes? (:body page) p)))
+                ;; 印 1（出る）: env のキー。「何も描かない」ページを落とす。
+                (check! "page shows a var key" true (str/includes? (:body page) visible-key))
+                ;; 印 2（出ない）: env の値。「全部描く」ページを落とす。
+                (check! "page hides var values" false (str/includes? (:body page) secret-value))
+                ;; 中継先だけは意図的に出す。これが出ないなら『全部隠す』側に倒れている。
+                (check! "page shows the relay destination" true
+                        (str/includes? (:body page) router-url))
+                ;; design system が bundle に載っていること。これは score では
+                ;; 言えない（design system 抜きのページでも 96.63 を出し --min 95 を
+                ;; 通ることを実測している）ので、DADS の class を直接見る。
+                (check! "page carries the design system" true
+                        (str/includes? (:body page) "dads-table"))
+                (check! "GET /health status" 200 (:status health))
+                (check! "health names its routes" true (str/includes? (:body health) "/xrpc/:nsid"))
+                ;; nsid 無しの XRPC だけが 400。前方一致で素通ししない。
+                (check! "POST /xrpc/ status" 400 (:status bad))
+                ;; 多段パスは移行前の [...path] と同じく **中継する**。単一
+                ;; セグメントと同じ結末になることを、解決しない router URL への
+                ;; 到達失敗（502）の一致として見る。
+                (check! "single-segment xrpc is relayed (upstream unreachable)" 502 (:status one))
+                (check! "multi-segment xrpc is relayed the same way" (:status one) (:status multi))
+                (check! "relay failure names the destination" true
+                        (str/includes? (:body multi) router-url))
+                (check! "OPTIONS preflight" 204 (:status pre))
+                (check! "unknown path" 404 (:status nf))
+                (check! "wrong method" 405 (:status mna))
+                (let [f @failures]
+                  (if (seq f)
+                    (do (println (str "FAILED\t" (count f) " check(s): " (str/join ", " f)))
+                        (js/process.exit 1))
+                    (do (println "OK\tthe built bundle answers as the route table says")
+                        (js/process.exit 0))))))))))
+    (.catch (fn [e]
+              (println (str "UNDETERMINED\tcould not exercise the bundle: " (.-message e)))
+              (js/process.exit 2))))

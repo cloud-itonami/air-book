@@ -1,16 +1,19 @@
 {
   "name": "kotodama-a1rb00k1",
-  "main": "svelte/.svelte-kit/cloudflare/_worker.js",
+  // Compiled from src/air_book/worker.cljs by shadow-cljs (:target :esm).
+  // Before the cljs migration this pointed at svelte/.svelte-kit/cloudflare/_worker.js
+  // -- a build output that is not in this tree -- and src/app.ts, the file that read
+  // like the application, was in no bundle at all. See docs/adr/0001.
+  "main": "dist/worker.js",
   "compatibility_date": "2025-03-17",
-  "compatibility_flags": [
-    "nodejs_compat",
-    "nodejs_als"
-  ],
+  // nodejs_compat / nodejs_als were adapter-cloudflare's requirement, not this
+  // bundle's. Removed after running the :esm bundle in workerd without them
+  // (docs/operator-quickstart.md S4.6) -- measured, not assumed.
   "vars": {
     "APP_CAPABILITIES": "[\"createPnr\",\"confirmBooking\",\"issueTicket\"]",
     "APP_DESCRIPTION": "air-book — airline reservations and ticketing. Handles PNR creation, booking confirmation, ticket issuance, seat assignment, ancillary services, cancellations, reprotection, and BSP settlement.",
     "APP_DISPLAY_NAME": "Air Reservations",
-    "APP_FRAMEWORK": "sveltekit-edge-bff",
+    "APP_FRAMEWORK": "cljs-esm-worker",
     "APP_NANOID": "a1rb00k1",
     "APP_PERFORMER_TYPE": "service",
     "APP_UI_TYPE": "yoro",
@@ -33,11 +36,5 @@
       "pattern": "air-book.etzhayyim.com/*",
       "zone_name": "etzhayyim.com"
     }
-  ],
-  "assets": {
-    "directory": "./svelte/.svelte-kit/cloudflare/client",
-    "binding": "ASSETS",
-    "html_handling": "auto-trailing-slash",
-    "not_found_handling": "none"
-  }
+  ]
 }

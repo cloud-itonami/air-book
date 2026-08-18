@@ -1,0 +1,22 @@
+;; air-book の appview Worker。:esm、先例は cloud-itonami-marketplace-listing と
+;; cloud-itonami/app-ongakuka。
+;;
+;; wrangler.jsonc の main は dist/worker.js を指し、それは src/ のソースから
+;; コンパイルされる THIS bundle である。docs/adr/0001 が記録した移行の要点は
+;; そこで、移行前の main は tree に存在しない SvelteKit のビルド出力を指し、
+;; 読み手が開く TypeScript はどの bundle にも入っていなかった。
+;;
+;; :warnings-as-errors は :compiler-options の中に置く。
+;; **:build-options ではない** —— shadow はそこに置かれたこのキーを黙って
+;; 無視するので、置き場所を間違えた検査そのものが「落ちない検査」になる。
+;; 未宣言 var や改名された var は既定では警告どまりで release が exit 0 を返し、
+;; 最初のリクエストで throw する bundle が出荷される。
+{:deps {:aliases [:cljs]}
+ :builds
+ {:worker
+  {:target :esm
+   :output-dir "dist"
+   :modules {:worker {:exports {default air-book.worker/handler}}}
+   :compiler-options {:output-feature-set :es2020
+                      :infer-externs :auto
+                      :warnings-as-errors true}}}}
