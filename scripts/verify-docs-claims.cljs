@@ -15,7 +15,7 @@
          '["node:child_process" :as cp]
          '["node:crypto" :as crypto]
          '[cljs.reader :as edn]
-         '[clojure.string :as str])
+         '[kotoba.lang.text :as str])
 
 (def root (or (first (remove #(str/starts-with? % "--") *command-line-args*)) "."))
 
@@ -145,7 +145,7 @@
                   (count (filter #{"nodejs_compat" "nodejs_als"}
                                  (or (get j "compatibility_flags") []))))
           (check! :framework-not-sveltekit true
-                  (not (str/includes? (str/lower-case (or (get-in j ["vars" "APP_FRAMEWORK"]) "")) "svelte")))
+                  (not (str/includes? (str/lower (or (get-in j ["vars" "APP_FRAMEWORK"]) "")) "svelte")))
           (if (nil? build)
             (undet! "shadow-cljs.edn has no :builds :worker")
             (do
