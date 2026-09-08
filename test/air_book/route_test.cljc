@@ -1,6 +1,6 @@
 (ns air-book.route-test
   (:require [clojure.test :refer [deftest is testing]]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [air-book.route :as route]
             [air-book.view :as view]))
 
