@@ -19,7 +19,7 @@ Cloudflare のアカウントは要らない（§5 の deploy だけが要る）
 git clone git@github.com:cloud-itonami/air-book.git
 cd air-book
 REPO=$PWD
-npx --yes nbb scripts/verify-docs-claims.cljs .
+npx --yes kbb --backend sci scripts/verify-docs-claims.cljk .
 ```
 
 末尾が `OK` なら README の数値・存在・不在は tree と一致している。
@@ -50,7 +50,7 @@ cat > /tmp/run.cljs <<'EOF'
 (require '[cljs.test :refer [run-tests]] 'air-book.route-test)
 (run-tests 'air-book.route-test)
 EOF
-npx --yes nbb --classpath "$CP" /tmp/run.cljs
+npx --yes kbb --backend sci --classpath "$CP" /tmp/run.cljs
 ```
 
 実際の出力:
@@ -85,9 +85,9 @@ cat > /tmp/render.cljs <<'EOF'
                   :mcp-url "https://mcp.etzhayyim.com/xrpc/com.etzhayyim.mcp.message"}))
   (println "ok"))
 EOF
-DDS="$K/jp-go-digital-design-system" npx --yes nbb --classpath "$CP" /tmp/render.cljs
+DDS="$K/jp-go-digital-design-system" npx --yes kbb --backend sci --classpath "$CP" /tmp/render.cljs
 
-cd $K/design-quality && npx --yes nbb -m design-quality.cli score /tmp/ab-page.html --min 95
+cd $K/design-quality && npx --yes kbb --backend sci -m design-quality.cli score /tmp/ab-page.html --min 95
 ```
 
 実際の出力（末尾）:
@@ -110,7 +110,7 @@ resource governor）。直接叩かず、必ず guard 経由で:
 ```bash
 cd "$REPO"
 node ~/github/com-junkawasaki/scripts/resource-guard.mjs run build -- \
-  npx --yes shadow-cljs release worker
+  npx --yes amu compile --target wasm32-browser worker
 ls -la dist/worker.js
 ```
 
@@ -137,7 +137,7 @@ lock を他セッションが持っていると exit 2 で拒否される。**�
 ここが deploy されるものに触る唯一の検査である。
 
 ```bash
-cd "$REPO" && npx --yes nbb scripts/smoke-worker.cljs dist/worker.js
+cd "$REPO" && npx --yes kbb --backend sci scripts/smoke-worker.cljk dist/worker.js
 ```
 
 実際の出力（抜粋、18 項目すべて PASS）:
