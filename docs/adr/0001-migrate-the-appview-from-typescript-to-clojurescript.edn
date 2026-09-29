@@ -61,7 +61,7 @@ etzhayyim.com だけは解決する（104.21.51.111 / 172.67.179.128）。
             ↓ shadow-cljs :target :esm
     dist/worker.js             wrangler.jsonc の main が指すもの
 
-この workspace の正本言語は cljs と kotoba である（superproject CLAUDE.md の
+この workspace の正本言語は cljs と kotoba である（superproject AGENTS.md の
 runtime 順序 kotoba wasm > clojurewasm > ClojureScript > nbb）。TypeScript は
 その順序に無いので、app.ts と SvelteKit のどちらを正本に選んでも正本には
 着地しない。先例は同じ org の cloud-itonami/app-ongakuka と
