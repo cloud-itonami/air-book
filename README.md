@@ -50,7 +50,7 @@ var 8 個を宣言していた。値が `+page.svelte` に literal で焼かれ�
 **そのまま中継する** —— 空文字だけが 400。1 セグメントに絞るのは移行ではなく
 方針変更なので、ここではしない。
 
-## いま在るもの — 27 ファイル
+## いま在るもの — 28 ファイル
 
 | 面 | ファイル |
 |---|---|
@@ -99,6 +99,8 @@ var 8 個を宣言していた。値が `+page.svelte` に literal で焼かれ�
 キー。片方だけでは「全部隠す」も「全部出す」も通ってしまう。
 
 ## Static edition (IPFS)
+
+Published name: `ipns://k51qzi5uqu5djtt1dyta9dn81plkv9i1w1gijooiur8r48m5qfj58ysbvuzc5s` (recorded with the site CID in `kotoba.app.edn`). Public HTTPS entrance: `https://k51qzi5uqu5djtt1dyta9dn81plkv9i1w1gijooiur8r48m5qfj58ysbvuzc5s.ipns.220-146-170-114.sslip.io/`.
 
 Worker とは別に、説明ページの**静的版**を描ける。IPFS に content-addressed で
 置く版で、正準のアドレスは `ipns://` の名前（`{k51…}.ipns` の gateway origin
