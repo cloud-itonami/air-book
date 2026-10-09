@@ -33,6 +33,34 @@
            (:route/doc r)])
         routes))
 
+(defn- about-section
+  "冒頭の説明。Worker 版と静的版で同じ文言を共有する —— 2 つの版が別々の
+  説明を持つと、片方だけ直されて食い違う。"
+  []
+  (dds/section
+   {}
+   (dds/heading 1 "air-book — Airline Reservations")
+   [:p {:class "ab-lede"}
+    "航空券の予約・発券（PNR 作成、予約確定、発券、座席指定、付帯サービス、"
+    "取消、リプロテクション、BSP 精算）を扱う appview の公開面。"
+    "業務そのものは MCP router の先にあり、ここには無い。"]))
+
+(defn- routes-section [routes note]
+  (dds/section
+   {:title "この面が答えるもの"}
+   (dds/table {:caption "公開ルート"
+               :headers ["METHOD" "PATH" "何をするか"]
+               :rows (route-rows routes)})
+   [:p {:class "ab-note"} note]))
+
+(defn- status-section []
+  (dds/section
+   {:title "現在地"}
+   [:p {:class "ab-lede"}
+    "この appview は TypeScript/Svelte から ClojureScript へ移行済み。"
+    "deploy される bundle は、いま読んでいるソースからコンパイルされたもので"
+    "ある（docs/adr/0001）。"]))
+
 (defn body
   "opts:
    :routes   air-book.route/routes（この Worker が実際に答えるもの）
@@ -46,22 +74,12 @@
   その形（値の sentinel は出ない / 中継先は出る）で書いてある。"
   [{:keys [routes vars mcp-url]}]
   (dds/container
-   (dds/section
-    {}
-    (dds/heading 1 "air-book — Airline Reservations")
-    [:p {:class "ab-lede"}
-     "航空券の予約・発券（PNR 作成、予約確定、発券、座席指定、付帯サービス、"
-     "取消、リプロテクション、BSP 精算）を扱う appview の公開面。"
-     "業務そのものは MCP router の先にあり、ここには無い。"])
+   (about-section)
 
-   (dds/section
-    {:title "この面が答えるもの"}
-    (dds/table {:caption "公開ルート"
-                :headers ["METHOD" "PATH" "何をするか"]
-                :rows (route-rows routes)})
-    [:p {:class "ab-note"}
-     "この表は Worker の route 表そのものから描いている。ページに焼いた値では"
-     "ないので、実際に答えるものと表示がずれない。"])
+   (routes-section
+    routes
+    (str "この表は Worker の route 表そのものから描いている。ページに焼いた値では"
+         "ないので、実際に答えるものと表示がずれない。"))
 
    (dds/section
     {:title "実行時の設定"}
@@ -73,20 +91,48 @@
      [:span {:class "ab-mono"} mcp-url]
      "（これだけは値を出す。中継先が読めなければ、壊れたときに何も分からない）"])
 
+   (status-section)))
+
+(defn static-body
+  "静的版（IPFS に content-addressed で置く版）の本文。opts は `:routes` だけを読む。
+
+  静的版には Worker が居ない。したがって `/health` も `/xrpc/:nsid` も
+  答えず、env も中継先も存在しない。**存在しないものを広告するページは、
+  route 表を焼いていた移行前のページと同じ欠陥を持つ**（ADR-0001）ので、
+  route 表は `:route/kind :page` に絞り、実行時の設定の節は出さない。
+  代わりに『これは静的版であり、中継は Worker 版にしか無い』と書く ——
+  黙って消すと、読み手は中継が壊れたのか元から無いのか区別できない。"
+  [{:keys [routes]}]
+  (dds/container
+   (about-section)
+
+   (routes-section
+    (filterv #(= :page (:route/kind %)) routes)
+    (str "この表は Worker の route 表のうち、静的に配れるもの（ページ）だけを"
+         "描いている。"))
+
    (dds/section
-    {:title "現在地"}
+    {:title "この版について"}
     [:p {:class "ab-lede"}
-     "この appview は TypeScript/Svelte から ClojureScript へ移行済み。"
-     "deploy される bundle は、いま読んでいるソースからコンパイルされたもので"
-     "ある（docs/adr/0001）。"])))
+     "これは IPFS に置いた content-addressed な静的版である。"
+     "正準のアドレスは ipns:// の名前で、DNS 名はそこを指す別名にすぎない。"]
+    [:p {:class "ab-note"}
+     "XRPC の中継は Worker 版にしか無い。この版は何も中継せず、"
+     "実行時の設定も持たない。"])
+
+   (status-section)))
 
 (defn render
-  "完全な HTML 文書。`css` は呼び出し側が渡す（ライブラリは I/O を持たない）。"
-  [{:keys [css] :as opts}]
+  "完全な HTML 文書。`css` は呼び出し側が渡す（ライブラリは I/O を持たない）。
+
+  `:static? true` で静的版（`static-body`）を描く。無ければ Worker 版で、
+  その出力は静的版を足す前と 1 バイトも変わらない —— Worker は並行して
+  deploy されたままなので、静的版のための変更が Worker の面を動かしてはならない。"
+  [{:keys [css static?] :as opts}]
   (page/->page
    {:title "air-book — Airline Reservations"
     :description "航空券の予約・発券を扱う appview の公開面。"
     :lang "ja"
     :css css
     :app-css (str tokens/bridge-css "\n" app-css)}
-   (body opts)))
+   (if static? (static-body opts) (body opts))))
