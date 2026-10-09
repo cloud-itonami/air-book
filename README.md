@@ -50,17 +50,18 @@ var 8 個を宣言していた。値が `+page.svelte` に literal で焼かれ�
 **そのまま中継する** —— 空文字だけが 400。1 セグメントに絞るのは移行ではなく
 方針変更なので、ここではしない。
 
-## いま在るもの — 25 ファイル
+## いま在るもの — 28 ファイル
 
 | 面 | ファイル |
 |---|---|
 | 判断・描画・edge | `src/air_book/{route.cljc, view.cljc, worker.cljs}` |
-| テスト | `test/air_book/route_test.cljc`（6 tests / 24 assertions） |
+| テスト | `test/air_book/route_test.cljc`（7 tests / 38 assertions） |
 | ビルド | `deps.edn` / `shadow-cljs.edn` |
 | Worker 設定 | `wrangler.jsonc` |
 | actor 記述子 | `kotodama.jsonld` |
 | domain library（**TypeScript のまま**） | `kotoba/`（7 ファイル） |
 | 検証 | `scripts/{smoke-worker.cljs, verify-docs-claims.cljs}` |
+| 静的版の描画 | `scripts/render-static.kotoba` |
 | 由来・権利・識別 | `NOTICE` / `README.edn` / `migration.edn` / `MIGRATION-TODO.md` |
 | 文書 | `README.md` / `docs/operator-quickstart.md` / `docs/adr/0001-*.edn` |
 
@@ -96,6 +97,32 @@ var 8 個を宣言していた。値が `+page.svelte` に literal で焼かれ�
 だけは意図的に出す（中継先が読めないページは、中継が壊れたときに何の助けにも
 ならない）。検査は印を 2 つ独立に当てる: 出てはならない値と、出なければならない
 キー。片方だけでは「全部隠す」も「全部出す」も通ってしまう。
+
+## Static edition (IPFS)
+
+Published name: `ipns://k51qzi5uqu5djtt1dyta9dn81plkv9i1w1gijooiur8r48m5qfj58ysbvuzc5s` (recorded with the site CID in `kotoba.app.edn`). Public HTTPS entrance: `https://k51qzi5uqu5djtt1dyta9dn81plkv9i1w1gijooiur8r48m5qfj58ysbvuzc5s.ipns.220-146-170-114.sslip.io/`.
+
+Worker とは別に、説明ページの**静的版**を描ける。IPFS に content-addressed で
+置く版で、正準のアドレスは `ipns://` の名前（`{k51…}.ipns` の gateway origin
+でも読める）、DNS 名はその別名にすぎない。Worker 版は並行して deploy された
+ままで、この版のための変更はその出力を 1 バイトも変えない（`:static?` が
+無ければ従来どおり描く）。
+
+静的版には Worker が居ないので、`/health` も `/xrpc/:nsid` も中継先も env の
+キーも**出さない**。route 表は `:route/kind :page` のものだけを描き、
+「XRPC の中継は Worker 版にしか無い」と書く。テスト
+（`static-edition-advertises-only-what-exists`）が、同じ opts を渡したうえで
+静的版に出ないこと・Worker 版に出ることを対で検査する。
+
+```bash
+K=~/github/com-junkawasaki/orgs/kotoba-lang
+DDS=$K/jp-go-digital-design-system \
+  kbb --backend sci --classpath "src:$K/jp-go-digital-design-system/src:$K/html/src:$K/css/src" \
+  scripts/render-static.kotoba          # → dist/static/index.html（git 管理外）
+```
+
+出力は決定論的である（時刻も env も読まない）。2 回描いて sha256 が一致する
+ことを確かめてから publish する。
 
 ## 呼び先が 1 つも解決しない（移行では直らない）
 

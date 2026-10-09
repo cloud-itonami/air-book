@@ -58,7 +58,7 @@ npx --yes kbb --backend sci --classpath "$CP" /tmp/run.cljs
 ```
 Testing air-book.route-test
 
-Ran 6 tests containing 24 assertions.
+Ran 7 tests containing 38 assertions.
 0 failures, 0 errors.
 ```
 
